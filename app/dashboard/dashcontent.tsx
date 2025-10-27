@@ -1,9 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import UIDsMonitorWidget from '../components/FloatingWidget';
+import dynamic from 'next/dynamic';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+
+// Dynamically import the UIDsMonitorWidget with no SSR
+const UIDsMonitorWidget = dynamic(() => import('../components/FloatingWidget'), {
+  ssr: false,
+  loading: () => null
+});
 
 type FormType = 'firstform' | 'secondform' | 'thirdform' | 'fourthform' | 
                 'fifthform' | 'sixthform' | 'seventhform' | 'eighthform';
@@ -85,6 +91,12 @@ export default function MinimalDashboard() {
   });
   const [allFormData, setAllFormData] = useState<ManageFormData[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [isClient, setIsClient] = useState(false);
+
+  // Set client-side flag
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Form configurations with titles and colors
   const formConfigs: Record<FormType, { 
@@ -1066,8 +1078,8 @@ export default function MinimalDashboard() {
         )}
       </main>
 
-      {/* Floating UIDs Monitor Widget */}
-      <UIDsMonitorWidget />
+      {/* Floating UIDs Monitor Widget - Only rendered on client side */}
+      {isClient && <UIDsMonitorWidget />}
     </div>
   );
 }

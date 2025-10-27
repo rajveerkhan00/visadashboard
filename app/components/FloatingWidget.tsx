@@ -16,14 +16,20 @@ export default function UIDsMonitorWidget() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [notificationCount, setNotificationCount] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isClient, setIsClient] = useState(false);
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const beepIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const previousUidsRef = useRef<string[]>([]);
 
+  // Set client-side flag on mount
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   // Create continuous beep sound for 20 seconds
   const playNotificationSound = () => {
-    if (!soundEnabled) return;
+    if (!soundEnabled || !isClient) return;
     
     try {
       stopNotificationSound();
@@ -98,6 +104,9 @@ export default function UIDsMonitorWidget() {
 
   // Real-time listener for UIDs
   useEffect(() => {
+    // Don't run on server side
+    if (!isClient) return;
+
     const useridDocRef = doc(db, 'users', 'userid');
     
     const unsubscribe = onSnapshot(
@@ -147,10 +156,12 @@ export default function UIDsMonitorWidget() {
       unsubscribe();
       stopNotificationSound();
     };
-  }, []);
+  }, [isClient]);
 
   const testSound = () => {
-    playNotificationSound();
+    if (isClient) {
+      playNotificationSound();
+    }
   };
 
   const stopSound = () => {
@@ -168,6 +179,12 @@ export default function UIDsMonitorWidget() {
 
   const closeModal = () => {
     setIsModalOpen(false);
+  };
+
+  const copyToClipboard = (text: string) => {
+    if (isClient && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
   };
 
   // Floating Widget Component
@@ -264,7 +281,8 @@ export default function UIDsMonitorWidget() {
             <div className="flex flex-wrap gap-3 justify-center">
               <button
                 onClick={testSound}
-                className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition-colors"
+                disabled={!isClient}
+                className="bg-yellow-500 hover:bg-yellow-600 disabled:bg-yellow-300 text-white px-4 py-2 rounded-lg transition-colors"
               >
                 Test Sound
               </button>
@@ -369,8 +387,9 @@ export default function UIDsMonitorWidget() {
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => navigator.clipboard.writeText(uid)}
-                          className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded transition-colors"
+                          onClick={() => copyToClipboard(uid)}
+                          disabled={!isClient}
+                          className="text-xs bg-blue-100 hover:bg-blue-200 disabled:bg-blue-50 text-blue-700 px-3 py-1 rounded transition-colors"
                         >
                           Copy
                         </button>
@@ -393,6 +412,11 @@ export default function UIDsMonitorWidget() {
       </div>
     </div>
   );
+
+  // Don't render anything during SSR to avoid localStorage issues
+  if (!isClient) {
+    return null;
+  }
 
   return (
     <>
