@@ -17,15 +17,79 @@ export default function UIDsMonitorWidget() {
   const [notificationCount, setNotificationCount] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isClient, setIsClient] = useState(false);
+  const [runInBackground, setRunInBackground] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const beepIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const previousUidsRef = useRef<string[]>([]);
 
-  // Set client-side flag on mount
+  // Set client-side flag on mount and check background run status
   useEffect(() => {
     setIsClient(true);
+    
+    // Check notification permission
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+    
+    // Check if background run was previously enabled
+    const backgroundEnabled = localStorage.getItem('uidMonitor_runInBackground');
+    if (backgroundEnabled === 'true') {
+      setRunInBackground(true);
+    }
   }, []);
+
+  // Request notification permission
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      console.log('This browser does not support notifications');
+      return false;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      return permission === 'granted';
+    } catch (error) {
+      console.error('Error requesting notification permission:', error);
+      return false;
+    }
+  };
+
+  // Toggle background monitoring
+  const toggleBackgroundMonitoring = async () => {
+    if (!runInBackground) {
+      // Enable background monitoring
+      const permissionGranted = await requestNotificationPermission();
+      
+      if (permissionGranted) {
+        setRunInBackground(true);
+        localStorage.setItem('uidMonitor_runInBackground', 'true');
+        
+        // Show confirmation notification
+        showBrowserNotification(
+          'UID Monitor Started', 
+          'Background monitoring is now active. You will receive notifications even when browser is closed.'
+        );
+      } else {
+        alert('Notification permission is required for background monitoring.');
+        return;
+      }
+    } else {
+      // Disable background monitoring
+      setRunInBackground(false);
+      localStorage.setItem('uidMonitor_runInBackground', 'false');
+      
+      // Show stop notification
+      if (notificationPermission === 'granted') {
+        showBrowserNotification(
+          'UID Monitor Stopped', 
+          'Background monitoring has been disabled.'
+        );
+      }
+    }
+  };
 
   // Create continuous beep sound for 20 seconds
   const playNotificationSound = () => {
@@ -89,6 +153,38 @@ export default function UIDsMonitorWidget() {
     }
   };
 
+  // Show browser notification
+  const showBrowserNotification = (title: string, body: string) => {
+    if (!('Notification' in window) || notificationPermission !== 'granted') {
+      return;
+    }
+    
+    try {
+      const notification = new Notification(title, {
+        body: body,
+        icon: '/icon.png',
+        badge: '/icon.png',
+        requireInteraction: true, // Keep notification visible until user interacts
+        tag: 'uid-monitor' // Group similar notifications
+      });
+
+      // Handle notification click
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+        openModal();
+      };
+
+      // Auto-close after 10 seconds
+      setTimeout(() => {
+        notification.close();
+      }, 10000);
+
+    } catch (error) {
+      console.error('Error showing notification:', error);
+    }
+  };
+
   // Stop the notification sound
   const stopNotificationSound = () => {
     if (beepIntervalRef.current) {
@@ -129,6 +225,12 @@ export default function UIDsMonitorWidget() {
                 playNotificationSound();
                 setNotificationCount(prev => prev + 1);
                 
+                // Show browser notification for new UID
+                showBrowserNotification(
+                  '🎉 New User Registered!', 
+                  `UID: ${latestNewUid}\nClick to view details.`
+                );
+                
                 setTimeout(() => {
                   setNewUidDetected(null);
                 }, 25000);
@@ -156,7 +258,7 @@ export default function UIDsMonitorWidget() {
       unsubscribe();
       stopNotificationSound();
     };
-  }, [isClient]);
+  }, [isClient, runInBackground, notificationPermission]);
 
   const testSound = () => {
     if (isClient) {
@@ -197,12 +299,21 @@ export default function UIDsMonitorWidget() {
         </div>
       )}
       
+      {/* Background Run Indicator */}
+      {runInBackground && (
+        <div className="absolute -top-2 -left-2 bg-green-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs font-bold">
+          🔄
+        </div>
+      )}
+      
       {/* Main Widget Button */}
       <button
         onClick={openModal}
         className={`relative p-4 rounded-full shadow-2xl transition-all duration-300 hover:scale-110 ${
           newUidDetected 
             ? 'bg-green-500 animate-pulse ring-4 ring-green-300' 
+            : runInBackground
+            ? 'bg-purple-600 ring-2 ring-purple-300'
             : 'bg-blue-600 hover:bg-blue-700'
         }`}
         title="Real-time UIDs Monitor"
@@ -210,6 +321,8 @@ export default function UIDsMonitorWidget() {
         <div className="flex items-center justify-center">
           {newUidDetected ? (
             <span className="text-white text-xl">🎉</span>
+          ) : runInBackground ? (
+            <span className="text-white text-xl">🔄</span>
           ) : (
             <span className="text-white text-xl">📊</span>
           )}
@@ -226,6 +339,9 @@ export default function UIDsMonitorWidget() {
           Total: {uids.length} | New: {notificationCount}
         </div>
         <div className="text-xs text-green-400 mt-1">● LIVE</div>
+        {runInBackground && (
+          <div className="text-xs text-purple-400 mt-1">🔄 Background Mode</div>
+        )}
       </div>
     </div>
   );
@@ -235,7 +351,7 @@ export default function UIDsMonitorWidget() {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
         {/* Modal Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-white">
+        <div className="bg-linear-to-r from-blue-600 to-purple-600 p-6 text-white">
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-bold">Real-time UIDs Monitor</h2>
@@ -264,9 +380,9 @@ export default function UIDsMonitorWidget() {
             </div>
             <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
               <div className="text-2xl font-bold text-purple-600">
-                {uids.filter(uid => uid.includes('user_')).length}
+                {runInBackground ? 'ACTIVE' : 'INACTIVE'}
               </div>
-              <div className="text-sm text-purple-800">Valid Format</div>
+              <div className="text-sm text-purple-800">Background Mode</div>
             </div>
             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
               <div className="text-2xl font-bold text-orange-600">
@@ -279,6 +395,16 @@ export default function UIDsMonitorWidget() {
           {/* Controls */}
           <div className="bg-gray-50 p-4 rounded-lg mb-6">
             <div className="flex flex-wrap gap-3 justify-center">
+              <button
+                onClick={toggleBackgroundMonitoring}
+                className={`px-4 py-2 rounded-lg transition-colors font-semibold ${
+                  runInBackground 
+                    ? 'bg-red-500 hover:bg-red-600 text-white' 
+                    : 'bg-green-500 hover:bg-green-600 text-white'
+                }`}
+              >
+                {runInBackground ? 'Stop Background' : 'Run in Background'}
+              </button>
               <button
                 onClick={testSound}
                 disabled={!isClient}
@@ -303,11 +429,40 @@ export default function UIDsMonitorWidget() {
                 Sound: {soundEnabled ? 'ON' : 'OFF'}
               </button>
             </div>
+            
+            {/* Notification Permission Status */}
+            <div className="mt-3 text-center">
+              <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+                notificationPermission === 'granted' 
+                  ? 'bg-green-100 text-green-800' 
+                  : notificationPermission === 'denied'
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-yellow-100 text-yellow-800'
+              }`}>
+                <span className="w-2 h-2 bg-current rounded-full mr-2"></span>
+                Notifications: {notificationPermission.toUpperCase()}
+              </div>
+            </div>
+            
+            {/* Background Mode Info */}
+            {runInBackground && (
+              <div className="mt-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                <div className="flex items-center">
+                  <div className="text-purple-500 text-xl mr-2">🔄</div>
+                  <div>
+                    <h4 className="font-semibold text-purple-800">Background Mode Active</h4>
+                    <p className="text-sm text-purple-700">
+                      You will receive browser notifications when new users register, even when this tab is closed.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* NEW UID ALERT */}
           {newUidDetected && (
-            <div className="bg-gradient-to-r from-green-100 to-emerald-100 border-l-4 border-green-500 p-4 mb-6 rounded-lg animate-pulse">
+            <div className="bg-linear-to-r from-green-100 to-emerald-100 border-l-4 border-green-500 p-4 mb-6 rounded-lg animate-pulse">
               <div className="flex justify-between items-center">
                 <div className="flex items-center">
                   <div className="text-green-500 text-2xl mr-3">🎉</div>
@@ -406,6 +561,11 @@ export default function UIDsMonitorWidget() {
             <div className="flex items-center justify-center text-green-600">
               <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
               <span className="text-sm">Real-time connection active</span>
+              {runInBackground && (
+                <span className="ml-2 text-purple-600">
+                  | 🔄 Background mode enabled
+                </span>
+              )}
             </div>
           </div>
         </div>
